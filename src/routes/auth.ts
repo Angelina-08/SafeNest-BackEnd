@@ -112,10 +112,7 @@ router.post('/login', [
             { expiresIn: Number(process.env.JWT_REFRESH_EXPIRATION) || 604800 }
         );
 
-        // Create session
-        const now = Math.floor(Date.now() / 1000);
-        const sessionExpiry = now + (7 * 24 * 60 * 60); // 7 days
-
+        // Store session
         await pool.query(
             'INSERT INTO sessions (user_id, jwt_token, refresh_token, ip_address, user_agent, session_expiry, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
             [
@@ -123,10 +120,10 @@ router.post('/login', [
                 token,
                 refreshToken,
                 req.ip,
-                req.headers['user-agent'] || 'unknown',
-                new Date(Date.now() + (Number(process.env.JWT_EXPIRATION) || 3600) * 1000),
-                new Date(),
-                new Date()
+                req.headers['user-agent'],
+                Math.floor(Date.now() / 1000) + (Number(process.env.JWT_EXPIRATION) || 3600),
+                Math.floor(Date.now() / 1000),
+                Math.floor(Date.now() / 1000)
             ]
         );
 
@@ -202,7 +199,13 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
         // Update session
         await pool.query(
             'UPDATE sessions SET jwt_token = $1, refresh_token = $2, updated_at = $3 WHERE user_id = $4 AND refresh_token = $5',
-            [newToken, newRefreshToken, new Date(), email, refreshToken]
+            [
+                newToken, 
+                newRefreshToken, 
+                Math.floor(Date.now() / 1000), 
+                email, 
+                refreshToken
+            ]
         );
 
         res.json({
