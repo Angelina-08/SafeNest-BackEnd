@@ -82,7 +82,7 @@ router.post('/login', [
 
         // Get user
         const result = await pool.query(
-            'SELECT email, first_name, last_name, email_verified, password_hash FROM users WHERE email = $1',
+            'SELECT email, first_name, last_name, email_verification_status, password_hash FROM users WHERE email = $1',
             [email]
         );
 
@@ -136,7 +136,7 @@ router.post('/login', [
             user: {
                 firstName: user.first_name,
                 lastName: user.last_name,
-                emailVerified: user.email_verified
+                emailVerified: user.email_verification_status
             }
         });
     } catch (error) {
