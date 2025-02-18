@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import bcrypt from 'bcrypt';
 import jwt, { Secret } from 'jsonwebtoken';
@@ -29,14 +29,14 @@ router.post('/register', [
     body('password').isLength({ min: 8 }),
     body('firstName').notEmpty(),
     body('lastName').notEmpty()
-], async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        res.status(400).json({ errors: errors.array() });
-        return;
-    }
-
+], async (req: Request, res: Response, next: NextFunction) => {
     try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            res.status(400).json({ errors: errors.array() });
+            return;
+        }
+
         const { email, password, firstName, lastName } = req.body;
 
         // Check if user already exists
@@ -62,8 +62,7 @@ router.post('/register', [
 
         res.status(201).json({ message: 'User registered successfully' });
     } catch (error) {
-        console.error('Registration error:', error);
-        res.status(500).json({ error: 'Server error' });
+        next(error);
     }
 });
 
@@ -71,14 +70,14 @@ router.post('/register', [
 router.post('/login', [
     body('email').isEmail(),
     body('password').exists()
-], async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        res.status(400).json({ errors: errors.array() });
-        return;
-    }
-
+], async (req: Request, res: Response, next: NextFunction) => {
     try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            res.status(400).json({ errors: errors.array() });
+            return;
+        }
+
         const { email, password } = req.body;
 
         // Get user
@@ -141,13 +140,12 @@ router.post('/login', [
             }
         });
     } catch (error) {
-        console.error('Login error:', error);
-        res.status(500).json({ error: 'Server error' });
+        next(error);
     }
 });
 
 // Logout user
-router.post('/logout', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+router.post('/logout', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
     try {
         const authHeader = req.headers['authorization'];
         const token = authHeader && authHeader.split(' ')[1];
@@ -160,18 +158,18 @@ router.post('/logout', authenticateToken, async (req: Request, res: Response): P
 
         res.json({ message: 'Logged out successfully' });
     } catch (error) {
-        console.error('Logout error:', error);
-        res.status(500).json({ error: 'Server error' });
+        next(error);
     }
 });
 
 // Refresh token
-router.post('/refresh', async (req: Request, res: Response) => {
+router.post('/refresh', async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { refreshToken } = req.body;
 
         if (!refreshToken) {
-            return res.status(401).json({ error: 'Refresh token required' });
+            res.status(401).json({ error: 'Refresh token required' });
+            return;
         }
 
         const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || '') as { email: string };
@@ -184,7 +182,8 @@ router.post('/refresh', async (req: Request, res: Response) => {
         );
 
         if (sessionResult.rows.length === 0) {
-            return res.status(401).json({ error: 'Invalid refresh token' });
+            res.status(401).json({ error: 'Invalid refresh token' });
+            return;
         }
 
         // Generate new tokens
@@ -211,8 +210,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
             refreshToken: newRefreshToken
         });
     } catch (error) {
-        console.error('Refresh token error:', error);
-        res.status(401).json({ error: 'Invalid refresh token' });
+        next(error);
     }
 });
 
