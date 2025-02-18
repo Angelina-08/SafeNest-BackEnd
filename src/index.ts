@@ -21,8 +21,8 @@ app.use(express.json());
 // Routes
 app.use('/api/auth', authRoutes);
 
-// Health check endpoint
-app.get('/health', (req, res) => {
+// Default and Health check endpoint
+app.get('/', (req, res) => {
     res.status(200).json({ status: 'ok' });
 });
 
