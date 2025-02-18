@@ -83,7 +83,7 @@ router.post('/login', [
 
         // Get user
         const result = await pool.query(
-            'SELECT email, password_hash FROM users WHERE email = $1',
+            'SELECT id, email, first_name, last_name, email_verified, password_hash FROM users WHERE email = $1',
             [email]
         );
 
@@ -120,14 +120,14 @@ router.post('/login', [
         await pool.query(
             'INSERT INTO sessions (user_id, jwt_token, refresh_token, ip_address, user_agent, session_expiry, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
             [
-                email,
+                user.email,
                 token,
                 refreshToken,
                 req.ip,
                 req.headers['user-agent'] || 'unknown',
-                sessionExpiry,
-                now,
-                now
+                new Date(Date.now() + (Number(process.env.JWT_EXPIRATION) || 3600) * 1000),
+                new Date(),
+                new Date()
             ]
         );
 
@@ -135,7 +135,9 @@ router.post('/login', [
             token,
             refreshToken,
             user: {
-                email: user.email
+                firstName: user.first_name,
+                lastName: user.last_name,
+                emailVerified: user.email_verified
             }
         });
     } catch (error) {
@@ -164,50 +166,44 @@ router.post('/logout', authenticateToken, async (req: Request, res: Response): P
 });
 
 // Refresh token
-router.post('/refresh-token', async (req: Request, res: Response): Promise<void> => {
-    const { refreshToken } = req.body;
-
-    if (!refreshToken) {
-        res.status(401).json({ error: 'Refresh token required' });
-        return;
-    }
-
+router.post('/refresh', async (req: Request, res: Response) => {
     try {
-        // Verify refresh token is valid and active
-        const session = await pool.query(
-            'SELECT user_id, is_active, session_expiry FROM sessions WHERE refresh_token = $1',
-            [refreshToken]
-        );
+        const { refreshToken } = req.body;
 
-        if (session.rows.length === 0 || !session.rows[0].is_active) {
-            res.status(401).json({ error: 'Invalid refresh token' });
-            return;
+        if (!refreshToken) {
+            return res.status(401).json({ error: 'Refresh token required' });
         }
 
-        const { user_id, session_expiry } = session.rows[0];
-        const now = Math.floor(Date.now() / 1000);
+        const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || '') as { email: string };
+        const email = decoded.email;
 
-        if (session_expiry < now) {
-            res.status(401).json({ error: 'Session expired' });
-            return;
+        // Get session
+        const sessionResult = await pool.query(
+            'SELECT * FROM sessions WHERE user_id = $1 AND refresh_token = $2',
+            [email, refreshToken]
+        );
+
+        if (sessionResult.rows.length === 0) {
+            return res.status(401).json({ error: 'Invalid refresh token' });
         }
 
         // Generate new tokens
         const newToken = jwt.sign(
-            { email: user_id },
+            { email },
             process.env.JWT_SECRET || '',
             { expiresIn: Number(process.env.JWT_EXPIRATION) || 3600 }
         );
+
         const newRefreshToken = jwt.sign(
-            { email: user_id },
+            { email },
             process.env.JWT_REFRESH_SECRET || '',
             { expiresIn: Number(process.env.JWT_REFRESH_EXPIRATION) || 604800 }
         );
 
         // Update session
         await pool.query(
-            'UPDATE sessions SET jwt_token = $1, refresh_token = $2, updated_at = $3 WHERE refresh_token = $4',
-            [newToken, newRefreshToken, now, refreshToken]
+            'UPDATE sessions SET jwt_token = $1, refresh_token = $2, updated_at = $3 WHERE user_id = $4 AND refresh_token = $5',
+            [newToken, newRefreshToken, new Date(), email, refreshToken]
         );
 
         res.json({
@@ -216,7 +212,7 @@ router.post('/refresh-token', async (req: Request, res: Response): Promise<void>
         });
     } catch (error) {
         console.error('Refresh token error:', error);
-        res.status(500).json({ error: 'Server error' });
+        res.status(401).json({ error: 'Invalid refresh token' });
     }
 });
 
