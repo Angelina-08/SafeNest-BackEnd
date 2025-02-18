@@ -217,4 +217,45 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
     }
 });
 
+// Get current user endpoint
+router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader) {
+            res.status(401).json({ error: 'No token provided' });
+            return;
+        }
+
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || '') as { email: string };
+        
+        // Get user data
+        const result = await pool.query(
+            'SELECT email, first_name, last_name, email_verification_status FROM users WHERE email = $1',
+            [decoded.email]
+        );
+
+        if (result.rows.length === 0) {
+            res.status(401).json({ error: 'User not found' });
+            return;
+        }
+
+        const user = result.rows[0];
+        res.json({
+            user: {
+                email: user.email,
+                firstName: user.first_name,
+                lastName: user.last_name,
+                emailVerified: user.email_verification_status
+            }
+        });
+    } catch (error) {
+        if (error instanceof jwt.JsonWebTokenError) {
+            res.status(401).json({ error: 'Invalid token' });
+            return;
+        }
+        next(error);
+    }
+});
+
 export default router;
