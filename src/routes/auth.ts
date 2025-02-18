@@ -1,11 +1,16 @@
 import { Router, Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
+import jwt, { Secret } from 'jsonwebtoken';
 import { pool } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import nodemailer from 'nodemailer';
 import crypto from 'crypto';
+
+// Validate required environment variables
+if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET) {
+    throw new Error('JWT_SECRET and JWT_REFRESH_SECRET must be set in environment variables');
+}
 
 const router = Router();
 
@@ -36,7 +41,7 @@ router.post('/register', [
 
         // Check if user already exists
         const userExists = await pool.query(
-            'SELECT * FROM user_information WHERE email = $1',
+            'SELECT email FROM users WHERE email = $1',
             [email]
         );
 
@@ -51,33 +56,21 @@ router.post('/register', [
 
         // Create user
         await pool.query(
-            'INSERT INTO user_information (email, email_verification_status, first_name, last_name, password_hash) VALUES ($1, $2, $3, $4, $5)',
+            'INSERT INTO users (email, email_verification_status, first_name, last_name, password_hash) VALUES ($1, $2, $3, $4, $5)',
             [email, false, firstName, lastName, passwordHash]
         );
 
-        // Send verification email
-        const verificationToken = crypto.randomBytes(32).toString('hex');
-        // Store verification token in database or cache
-        
-        const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
-        await transporter.sendMail({
-            from: process.env.EMAIL_USER,
-            to: email,
-            subject: 'Verify your email',
-            html: `Please click <a href="${verificationUrl}">here</a> to verify your email.`
-        });
-
-        res.status(201).json({ message: 'User registered successfully. Please verify your email.' });
+        res.status(201).json({ message: 'User registered successfully' });
     } catch (error) {
         console.error('Registration error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
 
-// Login
+// Login user
 router.post('/login', [
     body('email').isEmail(),
-    body('password').notEmpty()
+    body('password').exists()
 ], async (req: Request, res: Response): Promise<void> => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -89,45 +82,83 @@ router.post('/login', [
         const { email, password } = req.body;
 
         // Get user
-        const user = await pool.query(
-            'SELECT * FROM user_information WHERE email = $1',
+        const result = await pool.query(
+            'SELECT email, password_hash FROM users WHERE email = $1',
             [email]
         );
 
-        if (user.rows.length === 0) {
+        if (result.rows.length === 0) {
             res.status(401).json({ error: 'Invalid credentials' });
             return;
         }
 
-        // Check password
-        const validPassword = await bcrypt.compare(password, user.rows[0].password_hash);
+        const user = result.rows[0];
+
+        // Verify password
+        const validPassword = await bcrypt.compare(password, user.password_hash);
         if (!validPassword) {
             res.status(401).json({ error: 'Invalid credentials' });
             return;
         }
 
         // Generate tokens
-        const jwtToken = jwt.sign({ email }, process.env.JWT_SECRET as string, { expiresIn: '1h' });
-        const refreshToken = crypto.randomBytes(40).toString('hex');
+        const token = jwt.sign(
+            { email: user.email },
+            process.env.JWT_SECRET || '',
+            { expiresIn: Number(process.env.JWT_EXPIRATION) || 3600 }
+        );
+        const refreshToken = jwt.sign(
+            { email: user.email },
+            process.env.JWT_REFRESH_SECRET || '',
+            { expiresIn: Number(process.env.JWT_REFRESH_EXPIRATION) || 604800 }
+        );
 
         // Create session
+        const now = Math.floor(Date.now() / 1000);
+        const sessionExpiry = now + (7 * 24 * 60 * 60); // 7 days
+
         await pool.query(
-            'INSERT INTO session_information (user_id, jwt_token, refresh_token, ip_address, user_agent, is_active, session_expiry, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)',
+            'INSERT INTO sessions (user_id, jwt_token, refresh_token, ip_address, user_agent, session_expiry, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
             [
                 email,
-                jwtToken,
+                token,
                 refreshToken,
                 req.ip,
-                req.headers['user-agent'],
-                true,
-                Math.floor(Date.now() / 1000) + 3600, // 1 hour
-                Math.floor(Date.now() / 1000)
+                req.headers['user-agent'] || 'unknown',
+                sessionExpiry,
+                now,
+                now
             ]
         );
 
-        res.json({ token: jwtToken, refreshToken });
+        res.json({
+            token,
+            refreshToken,
+            user: {
+                email: user.email
+            }
+        });
     } catch (error) {
         console.error('Login error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Logout user
+router.post('/logout', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const authHeader = req.headers['authorization'];
+        const token = authHeader && authHeader.split(' ')[1];
+
+        // Invalidate session
+        await pool.query(
+            'UPDATE sessions SET is_active = false WHERE jwt_token = $1',
+            [token]
+        );
+
+        res.json({ message: 'Logged out successfully' });
+    } catch (error) {
+        console.error('Logout error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -142,144 +173,49 @@ router.post('/refresh-token', async (req: Request, res: Response): Promise<void>
     }
 
     try {
-        // Find session
+        // Verify refresh token is valid and active
         const session = await pool.query(
-            'SELECT * FROM session_information WHERE refresh_token = $1 AND is_active = true',
+            'SELECT user_id, is_active, session_expiry FROM sessions WHERE refresh_token = $1',
             [refreshToken]
         );
 
-        if (session.rows.length === 0) {
+        if (session.rows.length === 0 || !session.rows[0].is_active) {
             res.status(401).json({ error: 'Invalid refresh token' });
             return;
         }
 
-        const { user_id } = session.rows[0];
+        const { user_id, session_expiry } = session.rows[0];
+        const now = Math.floor(Date.now() / 1000);
 
-        // Generate new tokens
-        const newJwtToken = jwt.sign({ email: user_id }, process.env.JWT_SECRET as string, { expiresIn: '1h' });
-        const newRefreshToken = crypto.randomBytes(40).toString('hex');
-
-        // Update session
-        await pool.query(
-            'UPDATE session_information SET jwt_token = $1, refresh_token = $2, session_expiry = $3, updated_at = $4 WHERE refresh_token = $5',
-            [
-                newJwtToken,
-                newRefreshToken,
-                Math.floor(Date.now() / 1000) + 3600,
-                Math.floor(Date.now() / 1000),
-                refreshToken
-            ]
-        );
-
-        res.json({ token: newJwtToken, refreshToken: newRefreshToken });
-    } catch (error) {
-        console.error('Refresh token error:', error);
-        res.status(500).json({ error: 'Server error' });
-    }
-});
-
-// Reset password request
-router.post('/reset-password-request', [
-    body('email').isEmail()
-], async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        res.status(400).json({ errors: errors.array() });
-        return;
-    }
-
-    try {
-        const { email } = req.body;
-
-        // Check if user exists
-        const user = await pool.query(
-            'SELECT * FROM user_information WHERE email = $1',
-            [email]
-        );
-
-        if (user.rows.length === 0) {
-            // Return success even if user doesn't exist for security
-            res.json({ message: 'If an account exists, a password reset email has been sent.' });
+        if (session_expiry < now) {
+            res.status(401).json({ error: 'Session expired' });
             return;
         }
 
-        // Generate reset token
-        const resetToken = crypto.randomBytes(32).toString('hex');
-        const resetTokenExpiry = Math.floor(Date.now() / 1000) + 3600; // 1 hour
-
-        // Store reset token in database or cache 
-        
-        // Send reset email
-        const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
-        await transporter.sendMail({
-            from: process.env.EMAIL_USER,
-            to: email,
-            subject: 'Reset your password',
-            html: `Please click <a href="${resetUrl}">here</a> to reset your password. This link will expire in 1 hour.`
-        });
-
-        res.json({ message: 'If an account exists, a password reset email has been sent.' });
-    } catch (error) {
-        console.error('Reset password request error:', error);
-        res.status(500).json({ error: 'Server error' });
-    }
-});
-
-// Reset password
-router.post('/reset-password', [
-    body('token').notEmpty(),
-    body('password').isLength({ min: 8 })
-], async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        res.status(400).json({ errors: errors.array() });
-        return;
-    }
-
-    try {
-        const { token, password } = req.body;
-
-        // Verify token and get user
-        // This would involve checking the stored reset token and its expiry
-        
-        // Hash new password
-        const saltRounds = 10;
-        const passwordHash = await bcrypt.hash(password, saltRounds);
-
-        // Update password
-        // await pool.query(
-        //     'UPDATE user_information SET password_hash = $1 WHERE email = $2',
-        //     [passwordHash, userEmail]
-        // );
-
-        // Invalidate all active sessions for the user
-        // await pool.query(
-        //     'UPDATE session_information SET is_active = false WHERE user_id = $1',
-        //     [userEmail]
-        // );
-
-        res.json({ message: 'Password reset successful' });
-    } catch (error) {
-        console.error('Reset password error:', error);
-        res.status(500).json({ error: 'Server error' });
-    }
-});
-
-// Logout
-router.post('/logout', authenticateToken, async (req: Request, res: Response): Promise<void> => {
-    try {
-        const authHeader = req.headers['authorization'];
-        const token = authHeader && authHeader.split(' ')[1];
-
-        // Invalidate session
-        await pool.query(
-            'UPDATE session_information SET is_active = false WHERE jwt_token = $1',
-            [token]
+        // Generate new tokens
+        const newToken = jwt.sign(
+            { email: user_id },
+            process.env.JWT_SECRET || '',
+            { expiresIn: Number(process.env.JWT_EXPIRATION) || 3600 }
+        );
+        const newRefreshToken = jwt.sign(
+            { email: user_id },
+            process.env.JWT_REFRESH_SECRET || '',
+            { expiresIn: Number(process.env.JWT_REFRESH_EXPIRATION) || 604800 }
         );
 
-        res.json({ message: 'Logged out successfully' });
+        // Update session
+        await pool.query(
+            'UPDATE sessions SET jwt_token = $1, refresh_token = $2, updated_at = $3 WHERE refresh_token = $4',
+            [newToken, newRefreshToken, now, refreshToken]
+        );
+
+        res.json({
+            token: newToken,
+            refreshToken: newRefreshToken
+        });
     } catch (error) {
-        console.error('Logout error:', error);
+        console.error('Refresh token error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
