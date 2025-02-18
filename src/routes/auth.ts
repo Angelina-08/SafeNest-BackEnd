@@ -23,6 +23,27 @@ const transporter = nodemailer.createTransport({
     }
 });
 
+// Generate random 6-digit code
+const generateVerificationCode = (): string => {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+// Send verification email
+const sendVerificationEmail = async (email: string, code: string) => {
+    const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: email,
+        subject: 'SafeNest Email Verification',
+        html: `
+            <h1>Email Verification</h1>
+            <p>Your verification code is: <strong>${code}</strong></p>
+            <p>This code will expire in 15 minutes.</p>
+        `
+    };
+
+    await transporter.sendMail(mailOptions);
+};
+
 // Register new user
 router.post('/register', [
     body('email').isEmail(),
@@ -254,6 +275,95 @@ router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
             res.status(401).json({ error: 'Invalid token' });
             return;
         }
+        next(error);
+    }
+});
+
+// Resend verification code endpoint
+router.post('/resend-verification', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader) {
+            res.status(401).json({ error: 'No token provided' });
+            return;
+        }
+
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || '') as { email: string };
+        const email = decoded.email;
+
+        // Generate new verification code
+        const code = generateVerificationCode();
+        const now = Math.floor(Date.now() / 1000);
+        const expiresAt = now + (15 * 60); // 15 minutes from now
+
+        // Delete any existing unused codes for this user
+        await pool.query(
+            'DELETE FROM email_verifications WHERE email = $1 AND is_used = FALSE',
+            [email]
+        );
+
+        // Store new verification code
+        await pool.query(
+            'INSERT INTO email_verifications (email, code, created_at, expires_at) VALUES ($1, $2, $3, $4)',
+            [email, code, now, expiresAt]
+        );
+
+        // Send verification email
+        await sendVerificationEmail(email, code);
+
+        res.json({ message: 'Verification code sent' });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Verify email code endpoint
+router.post('/verify-email', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader) {
+            res.status(401).json({ error: 'No token provided' });
+            return;
+        }
+
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || '') as { email: string };
+        const email = decoded.email;
+        const { code } = req.body;
+
+        if (!code) {
+            res.status(400).json({ error: 'Verification code is required' });
+            return;
+        }
+
+        const now = Math.floor(Date.now() / 1000);
+
+        // Get the latest unused verification code
+        const result = await pool.query(
+            'SELECT * FROM email_verifications WHERE email = $1 AND code = $2 AND is_used = FALSE AND expires_at > $3 ORDER BY created_at DESC LIMIT 1',
+            [email, code, now]
+        );
+
+        if (result.rows.length === 0) {
+            res.status(400).json({ error: 'Invalid or expired verification code' });
+            return;
+        }
+
+        // Mark code as used
+        await pool.query(
+            'UPDATE email_verifications SET is_used = TRUE WHERE id = $1',
+            [result.rows[0].id]
+        );
+
+        // Update user's email verification status
+        await pool.query(
+            'UPDATE users SET email_verification_status = TRUE WHERE email = $1',
+            [email]
+        );
+
+        res.json({ verified: true });
+    } catch (error) {
         next(error);
     }
 });
