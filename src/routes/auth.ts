@@ -83,7 +83,7 @@ router.post('/login', [
 
         // Get user
         const result = await pool.query(
-            'SELECT id, email, first_name, last_name, email_verified, password_hash FROM users WHERE email = $1',
+            'SELECT email, first_name, last_name, email_verified, password_hash FROM users WHERE email = $1',
             [email]
         );
 
