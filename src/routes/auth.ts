@@ -142,9 +142,9 @@ router.post('/login', [
                 refreshToken,
                 req.ip,
                 req.headers['user-agent'],
-                Math.floor(Date.now() / 1000) + (Number(process.env.JWT_EXPIRATION) || 3600),
-                Math.floor(Date.now() / 1000),
-                Math.floor(Date.now() / 1000)
+                Date.now() + (Number(process.env.JWT_EXPIRATION) || 3600) * 1000, // Convert seconds to milliseconds
+                Date.now(),
+                Date.now()
             ]
         );
 
