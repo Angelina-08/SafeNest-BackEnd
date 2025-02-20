@@ -17,23 +17,28 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
     // Get houses owned by user and houses they have permission for
     const result = await pool.query(`
       SELECT DISTINCT
-        h.*,
+        h.home_id,
+        h.home_name,
+        h.home_image,
+        h.home_owner,
+        h.created_at,
+        h.updated_at,
         u.email as owner_email,
         CASE 
-          WHEN h.owner_email = $1 THEN 
+          WHEN h.home_owner = $1 THEN 
             (
               SELECT json_agg(json_build_object(
-                'email', p.user_email
+                'email', p.user_id
               ))
               FROM permissions p
-              WHERE p.home_id = h.id
+              WHERE p.home_id = h.home_id
             )
           ELSE NULL
         END as permissions
-      FROM homes h
-      LEFT JOIN users u ON h.owner_email = u.email
-      LEFT JOIN permissions p ON h.id = p.home_id
-      WHERE h.owner_email = $1 OR p.user_email = $1
+      FROM houses h
+      LEFT JOIN users u ON h.home_owner = u.email
+      LEFT JOIN permissions p ON h.home_id = p.home_id
+      WHERE h.home_owner = $1 OR p.user_id = $1
     `, [userEmail]);
 
     res.json(result.rows);
@@ -57,7 +62,7 @@ router.put('/:id/permissions', authenticateToken, async (req: AuthRequest, res: 
   try {
     // Verify user is the owner
     const house = await pool.query(
-      'SELECT owner_email FROM homes WHERE id = $1',
+      'SELECT home_owner FROM houses WHERE home_id = $1',
       [id]
     );
 
@@ -66,7 +71,7 @@ router.put('/:id/permissions', authenticateToken, async (req: AuthRequest, res: 
       return;
     }
 
-    if (house.rows[0].owner_email !== userEmail) {
+    if (house.rows[0].home_owner !== userEmail) {
       res.status(403).json({ error: 'Only the owner can modify permissions' });
       return;
     }
@@ -83,13 +88,13 @@ router.put('/:id/permissions', authenticateToken, async (req: AuthRequest, res: 
     // Add new permissions
     if (permissions && permissions.length > 0) {
       const values = permissions.map((email: string) => 
-        `('${email}', '${id}')`
+        `(${id}, '${email}')`
       ).join(',');
 
       await pool.query(`
-        INSERT INTO permissions (user_email, home_id)
+        INSERT INTO permissions (home_id, user_id)
         VALUES ${values}
-        ON CONFLICT (home_id, user_email) DO NOTHING
+        ON CONFLICT (home_id, user_id) DO NOTHING
       `);
     }
 
@@ -97,7 +102,7 @@ router.put('/:id/permissions', authenticateToken, async (req: AuthRequest, res: 
 
     // Get updated permissions
     const result = await pool.query(`
-      SELECT user_email as email
+      SELECT user_id as email
       FROM permissions
       WHERE home_id = $1
     `, [id]);
@@ -124,7 +129,7 @@ router.put('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
   try {
     // Verify user is the owner
     const house = await pool.query(
-      'SELECT owner_email FROM homes WHERE id = $1',
+      'SELECT home_owner FROM houses WHERE home_id = $1',
       [id]
     );
 
@@ -133,13 +138,13 @@ router.put('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
       return;
     }
 
-    if (house.rows[0].owner_email !== userEmail) {
+    if (house.rows[0].home_owner !== userEmail) {
       res.status(403).json({ error: 'Only the owner can modify the house' });
       return;
     }
 
     const result = await pool.query(
-      'UPDATE homes SET name = $1, image_url = $2 WHERE id = $3 RETURNING *',
+      'UPDATE houses SET home_name = $1, home_image = $2, updated_at = CURRENT_TIMESTAMP WHERE home_id = $3 RETURNING *',
       [name, imageUrl, id]
     );
 
@@ -162,7 +167,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 
   try {
     const result = await pool.query(
-      'INSERT INTO homes (name, image_url, owner_email) VALUES ($1, $2, $3) RETURNING *',
+      'INSERT INTO houses (home_name, home_image, home_owner) VALUES ($1, $2, $3) RETURNING *',
       [name, imageUrl, userEmail]
     );
 
