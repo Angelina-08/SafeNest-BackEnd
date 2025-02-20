@@ -1,9 +1,8 @@
 import express, { Response } from 'express';
-import { Pool } from 'pg';
+import { pool } from '../config/database';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 
 const router = express.Router();
-const pool = new Pool();
 
 // Get all houses for the authenticated user
 router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
