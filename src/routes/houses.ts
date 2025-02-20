@@ -43,9 +43,15 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
       )
     `, [userEmail]);
 
-    // Transform the permissions array into the expected format
+    // Transform the response to match frontend interface
     const houses = result.rows.map(house => ({
-      ...house,
+      homeId: house.home_id,
+      homeName: house.home_name,
+      homeImage: house.home_image,
+      homeOwner: house.home_owner,
+      ownerEmail: house.home_owner,
+      createdAt: house.created_at,
+      updatedAt: house.updated_at,
       permissions: house.permissions 
         ? house.permissions.map((email: string) => ({ email }))
         : undefined
@@ -158,7 +164,14 @@ router.put('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
       [name, imageUrl, id]
     );
 
-    res.json(result.rows[0]);
+    res.json({
+      homeId: result.rows[0].home_id,
+      homeName: result.rows[0].home_name,
+      homeImage: result.rows[0].home_image,
+      homeOwner: result.rows[0].home_owner,
+      createdAt: result.rows[0].created_at,
+      updatedAt: result.rows[0].updated_at
+    });
   } catch (error) {
     console.error('Error updating house:', error);
     res.status(500).json({ error: 'Failed to update house' });
@@ -181,7 +194,14 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
       [name, imageUrl, userEmail]
     );
 
-    res.status(201).json(result.rows[0]);
+    res.status(201).json({
+      homeId: result.rows[0].home_id,
+      homeName: result.rows[0].home_name,
+      homeImage: result.rows[0].home_image,
+      homeOwner: result.rows[0].home_owner,
+      createdAt: result.rows[0].created_at,
+      updatedAt: result.rows[0].updated_at
+    });
   } catch (error) {
     console.error('Error creating house:', error);
     res.status(500).json({ error: 'Failed to create house' });
