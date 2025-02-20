@@ -10,7 +10,10 @@ const app = express();
 
 // CORS configuration
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3001',
+    origin: [
+        'http://localhost:3001',           // Keep local development
+        'https://safenest-frontend.vercel.app'  // Add your deployed frontend URL
+      ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
