@@ -17,12 +17,19 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
     const result = await pool.query(
       'SELECT * FROM houses WHERE user_email = $1',
       [userEmail]
-    );
+    ).catch(err => {
+      console.error('Database query error:', err);
+      throw new Error('Database connection failed');
+    });
 
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching houses:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    if (error instanceof Error && error.message === 'Database connection failed') {
+      res.status(503).json({ error: 'Database service unavailable. Please try again later.' });
+    } else {
+      res.status(500).json({ error: 'Internal server error' });
+    }
   }
 });
 
@@ -45,12 +52,19 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
     const result = await pool.query(
       'INSERT INTO houses (home_name, home_image, user_email) VALUES ($1, $2, $3) RETURNING *',
       [homeName, homeImage, userEmail]
-    );
+    ).catch(err => {
+      console.error('Database query error:', err);
+      throw new Error('Database connection failed');
+    });
 
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error creating house:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    if (error instanceof Error && error.message === 'Database connection failed') {
+      res.status(503).json({ error: 'Database service unavailable. Please try again later.' });
+    } else {
+      res.status(500).json({ error: 'Internal server error' });
+    }
   }
 });
 
