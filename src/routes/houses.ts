@@ -14,7 +14,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
     }
 
     const result = await pool.query(
-      'SELECT * FROM houses WHERE user_email = $1',
+      'SELECT * FROM houses WHERE home_owner = $1',
       [userEmail]
     ).catch(err => {
       console.error('Database query error:', err);
@@ -49,7 +49,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
     }
 
     const result = await pool.query(
-      'INSERT INTO houses (home_name, home_image, user_email) VALUES ($1, $2, $3) RETURNING *',
+      'INSERT INTO houses (home_name, home_image, home_owner) VALUES ($1, $2, $3) RETURNING *',
       [homeName, homeImage, userEmail]
     ).catch(err => {
       console.error('Database query error:', err);
