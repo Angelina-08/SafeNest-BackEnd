@@ -16,6 +16,11 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     // Get houses owned by user and houses they have permission for
     const result = await pool.query(`
+      WITH user_permissions AS (
+        SELECT home_id, array_agg(user_id) as member_emails
+        FROM permissions
+        GROUP BY home_id
+      )
       SELECT DISTINCT
         h.home_id,
         h.home_name,
@@ -23,25 +28,30 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
         h.home_owner,
         h.created_at,
         h.updated_at,
-        u.email as owner_email,
         CASE 
           WHEN h.home_owner = $1 THEN 
-            (
-              SELECT json_agg(json_build_object(
-                'email', p.user_id
-              ))
-              FROM permissions p
-              WHERE p.home_id = h.home_id
-            )
+            COALESCE(p.member_emails, ARRAY[]::varchar[])
           ELSE NULL
         END as permissions
       FROM houses h
-      LEFT JOIN users u ON h.home_owner = u.email
-      LEFT JOIN permissions p ON h.home_id = p.home_id
-      WHERE h.home_owner = $1 OR p.user_id = $1
+      LEFT JOIN user_permissions p ON h.home_id = p.home_id
+      WHERE h.home_owner = $1 
+      OR h.home_id IN (
+        SELECT home_id 
+        FROM permissions 
+        WHERE user_id = $1
+      )
     `, [userEmail]);
 
-    res.json(result.rows);
+    // Transform the permissions array into the expected format
+    const houses = result.rows.map(house => ({
+      ...house,
+      permissions: house.permissions 
+        ? house.permissions.map((email: string) => ({ email }))
+        : undefined
+    }));
+
+    res.json(houses);
   } catch (error) {
     console.error('Error fetching houses:', error);
     res.status(500).json({ error: 'Failed to fetch houses' });
