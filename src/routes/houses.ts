@@ -1,12 +1,6 @@
 import express, { Response } from 'express';
 import { Pool } from 'pg';
-import { authenticateToken } from '../src/middleware/auth';
-
-interface AuthRequest extends express.Request {
-  user?: {
-    email: string;
-  };
-}
+import { authenticateToken, AuthRequest } from '../middleware/auth';
 
 const router = express.Router();
 const pool = new Pool();
@@ -21,9 +15,10 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
     }
 
     const result = await pool.query(
-      'SELECT * FROM houses WHERE home_owner = $1 ORDER BY created_at DESC',
+      'SELECT * FROM houses WHERE user_email = $1',
       [userEmail]
     );
+
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching houses:', error);
@@ -31,20 +26,25 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   }
 });
 
-// Create a new house
+// Create a new house for the authenticated user
 router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
-    const { homeName, homeImage } = req.body;
     const userEmail = req.user?.email;
-    
     if (!userEmail) {
       res.status(401).json({ error: 'User not authenticated' });
       return;
     }
 
+    const { homeName, homeImage } = req.body;
+    
+    if (!homeName || !homeImage) {
+      res.status(400).json({ error: 'Home name and image are required' });
+      return;
+    }
+
     const result = await pool.query(
-      'INSERT INTO houses (home_name, home_owner, home_image) VALUES ($1, $2, $3) RETURNING *',
-      [homeName, userEmail, homeImage]
+      'INSERT INTO houses (home_name, home_image, user_email) VALUES ($1, $2, $3) RETURNING *',
+      [homeName, homeImage, userEmail]
     );
 
     res.status(201).json(result.rows[0]);

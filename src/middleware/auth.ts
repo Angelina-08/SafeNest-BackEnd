@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { pool } from '../config/database';
 
-interface AuthRequest extends Request {
+export interface AuthRequest extends Request {
     user?: {
         email: string;
     };
