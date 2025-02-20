@@ -279,6 +279,43 @@ router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
     }
 });
 
+// Verify token endpoint
+router.get('/verify', authenticateToken, async (req: Request, res: Response) => {
+    try {
+        const userEmail = (req as any).user?.email;
+        
+        if (!userEmail) {
+            res.status(401).json({ valid: false });
+            return;
+        }
+
+        const result = await pool.query(
+            'SELECT email, first_name, last_name, email_verification_status FROM users WHERE email = $1',
+            [userEmail]
+        );
+
+        if (result.rows.length === 0) {
+            res.status(401).json({ valid: false });
+            return;
+        }
+
+        const user = result.rows[0];
+        
+        res.json({ 
+            valid: true,
+            user: {
+                email: user.email,
+                firstName: user.first_name,
+                lastName: user.last_name,
+                emailVerified: user.email_verification_status
+            }
+        });
+    } catch (error) {
+        console.error('Error verifying token:', error);
+        res.status(500).json({ error: 'Failed to verify token' });
+    }
+});
+
 // Resend verification code endpoint
 router.post('/resend-verification', async (req: Request, res: Response, next: NextFunction) => {
     try {
