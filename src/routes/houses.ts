@@ -78,7 +78,7 @@ router.put('/:id/permissions', authenticateToken, async (req: AuthRequest, res: 
   try {
     // Verify user is the owner
     const house = await pool.query(
-      'SELECT home_owner FROM houses WHERE home_id = $1',
+      'SELECT * FROM houses WHERE home_id = $1',
       [id]
     );
 
@@ -116,14 +116,33 @@ router.put('/:id/permissions', authenticateToken, async (req: AuthRequest, res: 
 
     await pool.query('COMMIT');
 
-    // Get updated permissions
-    const result = await pool.query(`
-      SELECT user_id as email
-      FROM permissions
-      WHERE home_id = $1
+    // Return the updated house data with permissions
+    const updatedHouse = await pool.query(`
+      WITH user_permissions AS (
+        SELECT home_id, array_agg(user_id) as member_emails
+        FROM permissions
+        WHERE home_id = $1
+        GROUP BY home_id
+      )
+      SELECT 
+        h.*,
+        COALESCE(p.member_emails, ARRAY[]::varchar[]) as permissions
+      FROM houses h
+      LEFT JOIN user_permissions p ON h.home_id = p.home_id
+      WHERE h.home_id = $1
     `, [id]);
 
-    res.json(result.rows);
+    const houseData = updatedHouse.rows[0];
+    res.json({
+      homeId: houseData.home_id,
+      homeName: houseData.home_name,
+      homeImage: houseData.home_image,
+      homeOwner: houseData.home_owner,
+      ownerEmail: houseData.home_owner,
+      permissions: houseData.permissions 
+        ? houseData.permissions.map((email: string) => ({ email }))
+        : []
+    });
   } catch (error) {
     await pool.query('ROLLBACK');
     console.error('Error updating permissions:', error);
