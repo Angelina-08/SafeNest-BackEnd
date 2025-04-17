@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import cors from 'cors';
 import authRoutes from './routes/auth';
 import housesRoutes from './routes/houses';
+import cameraRoutes from './routes/camera';
 
 dotenv.config();
 
@@ -26,6 +27,7 @@ app.use(express.json());
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/houses', housesRoutes);
+app.use('/api/camera', cameraRoutes);
 
 // Default and Health check endpoint
 app.get('/', (req, res) => {
