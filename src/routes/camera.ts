@@ -35,7 +35,7 @@ router.get('/house/:homeId', authenticateToken, async (req: AuthRequest, res: Re
       SELECT 
         camera_id, 
         camera_name, 
-        camera_address, 
+        rtsp_address, 
         hls_address,
         home_id, 
         created_at, 
@@ -49,7 +49,7 @@ router.get('/house/:homeId', authenticateToken, async (req: AuthRequest, res: Re
     const cameras = result.rows.map(camera => ({
       cameraId: camera.camera_id,
       cameraName: camera.camera_name,
-      cameraAddress: camera.camera_address,
+      cameraAddress: camera.rtsp_address,
       hlsAddress: camera.hls_address,
       homeId: camera.home_id,
       createdAt: camera.created_at,
@@ -92,7 +92,7 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
     res.json({
       cameraId: camera.camera_id,
       cameraName: camera.camera_name,
-      cameraAddress: camera.camera_address,
+      cameraAddress: camera.rtsp_address,
       hlsAddress: camera.hls_address,
       homeId: camera.home_id,
       createdAt: camera.created_at,
@@ -110,47 +110,43 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   const userEmail = req.user?.email;
 
   if (!userEmail) {
-    res.status(401).json({ error: 'User not authenticated' });
-    return;
+    return res.status(401).json({ error: 'Authentication required' });
   }
 
-  // Validate required fields
   if (!cameraName || !cameraAddress || !homeId) {
-    res.status(400).json({ error: 'Camera name, address, and home ID are required' });
-    return;
+    return res.status(400).json({ error: 'Camera name, RTSP address, and home ID are required' });
   }
 
   try {
-    // Verify user is the owner of the house or has permission
-    const house = await pool.query(`
-      SELECT h.home_owner
-      FROM houses h
-      LEFT JOIN permissions p ON h.home_id = p.home_id AND p.user_id = $1
-      WHERE h.home_id = $2 AND (h.home_owner = $1 OR p.user_id IS NOT NULL)
-    `, [userEmail, homeId]);
+    // Check if user has access to this home
+    const homeAccess = await pool.query(
+      `SELECT * FROM houses WHERE home_id = $1 AND (home_owner = $2 OR home_id IN (
+        SELECT home_id FROM permissions WHERE user_id = $2
+      ))`,
+      [homeId, userEmail]
+    );
 
-    if (house.rows.length === 0) {
-      res.status(403).json({ error: 'You do not have access to this house' });
-      return;
+    if (homeAccess.rows.length === 0) {
+      return res.status(403).json({ error: 'You do not have access to this home' });
     }
 
     // Create the camera
     const result = await pool.query(
-      'INSERT INTO cameras (camera_name, camera_address, hls_address, home_id) VALUES ($1, $2, $3, $4) RETURNING *',
+      'INSERT INTO cameras (camera_name, rtsp_address, hls_address, home_id) VALUES ($1, $2, $3, $4) RETURNING *',
       [cameraName, cameraAddress, hlsAddress, homeId]
     );
 
     res.status(201).json({
       cameraId: result.rows[0].camera_id,
       cameraName: result.rows[0].camera_name,
-      cameraAddress: result.rows[0].camera_address,
+      cameraAddress: result.rows[0].rtsp_address,
       hlsAddress: result.rows[0].hls_address,
       homeId: result.rows[0].home_id,
       createdAt: result.rows[0].created_at,
       updatedAt: result.rows[0].updated_at
     });
-  } catch (error: unknown) {
-    console.error('Error creating camera:', error instanceof Error ? error.message : 'Unknown error');
+  } catch (error) {
+    console.error('Error creating camera:', error);
     res.status(500).json({ error: 'Failed to create camera' });
   }
 });
@@ -162,8 +158,7 @@ router.put('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
   const userEmail = req.user?.email;
 
   if (!userEmail) {
-    res.status(401).json({ error: 'User not authenticated' });
-    return;
+    return res.status(401).json({ error: 'Authentication required' });
   }
 
   // Validate required fields
@@ -173,21 +168,21 @@ router.put('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
   }
 
   try {
-    // Verify user has access to the camera
-    const camera = await pool.query(`
-      SELECT c.*, h.home_owner
-      FROM cameras c
-      JOIN houses h ON c.home_id = h.home_id
-      LEFT JOIN permissions p ON h.home_id = p.home_id AND p.user_id = $1
-      WHERE c.camera_id = $2 AND (h.home_owner = $1 OR p.user_id IS NOT NULL)
-    `, [userEmail, id]);
+    // Check if user has access to this camera
+    const cameraAccess = await pool.query(
+      `SELECT c.* FROM cameras c
+       JOIN houses h ON c.home_id = h.home_id
+       WHERE c.camera_id = $1 AND (h.home_owner = $2 OR h.home_id IN (
+         SELECT home_id FROM permissions WHERE user_id = $2
+       ))`,
+      [id, userEmail]
+    );
 
-    if (camera.rows.length === 0) {
-      res.status(404).json({ error: 'Camera not found or access denied' });
-      return;
+    if (cameraAccess.rows.length === 0) {
+      return res.status(403).json({ error: 'You do not have access to this camera' });
     }
 
-    // Build the update query dynamically based on provided fields
+    // Build update query
     let updateQuery = 'UPDATE cameras SET updated_at = CURRENT_TIMESTAMP';
     const queryParams = [];
     let paramIndex = 1;
@@ -199,7 +194,7 @@ router.put('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
     }
 
     if (cameraAddress) {
-      updateQuery += `, camera_address = $${paramIndex}`;
+      updateQuery += `, rtsp_address = $${paramIndex}`;
       queryParams.push(cameraAddress);
       paramIndex++;
     }
@@ -213,20 +208,19 @@ router.put('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
     updateQuery += ` WHERE camera_id = $${paramIndex} RETURNING *`;
     queryParams.push(id);
 
-    // Execute the update
     const result = await pool.query(updateQuery, queryParams);
 
     res.json({
       cameraId: result.rows[0].camera_id,
       cameraName: result.rows[0].camera_name,
-      cameraAddress: result.rows[0].camera_address,
+      cameraAddress: result.rows[0].rtsp_address,
       hlsAddress: result.rows[0].hls_address,
       homeId: result.rows[0].home_id,
       createdAt: result.rows[0].created_at,
       updatedAt: result.rows[0].updated_at
     });
-  } catch (error: unknown) {
-    console.error('Error updating camera:', error instanceof Error ? error.message : 'Unknown error');
+  } catch (error) {
+    console.error('Error updating camera:', error);
     res.status(500).json({ error: 'Failed to update camera' });
   }
 });
@@ -282,7 +276,7 @@ router.post('/stream/start', authenticateToken, async (req: AuthRequest, res: Re
     
     // Get camera details from database
     const camera = await pool.query(`
-      SELECT c.camera_address, c.hls_address, h.home_owner
+      SELECT c.rtsp_address, c.hls_address, h.home_owner
       FROM cameras c
       JOIN houses h ON c.home_id = h.home_id
       LEFT JOIN permissions p ON h.home_id = p.home_id AND p.user_id = $1
@@ -314,7 +308,7 @@ router.post('/stream/start', authenticateToken, async (req: AuthRequest, res: Re
       const response = await axios.post(
         `${mjpegServerUrl}/start-stream`,
         {
-          rtspUrl: camera.rows[0].camera_address,
+          rtspUrl: camera.rows[0].rtsp_address,
           sessionId
         },
         {
