@@ -287,7 +287,10 @@ router.post('/stream/start', authenticateToken, async (req: AuthRequest, res: Re
     const sessionId = uuidv4();
     
     // Request stream from MJPEG server
-    const mjpegServerUrl = process.env.MJPEG_SERVER_URL || 'http://localhost:3000';
+    let mjpegServerUrl = process.env.MJPEG_SERVER_URL || 'http://localhost:3000';
+    // Remove trailing slash if present to avoid double slash in URL
+    mjpegServerUrl = mjpegServerUrl.endsWith('/') ? mjpegServerUrl.slice(0, -1) : mjpegServerUrl;
+    
     const mjpegServerToken = process.env.MJPEG_SERVER_TOKEN;
     
     if (!mjpegServerToken) {
@@ -339,7 +342,10 @@ router.post('/stream/stop', authenticateToken, async (req: AuthRequest, res: Res
     }
     
     // Request stream termination from MJPEG server
-    const mjpegServerUrl = process.env.MJPEG_SERVER_URL || 'http://localhost:3000';
+    let mjpegServerUrl = process.env.MJPEG_SERVER_URL || 'http://localhost:3000';
+    // Remove trailing slash if present to avoid double slash in URL
+    mjpegServerUrl = mjpegServerUrl.endsWith('/') ? mjpegServerUrl.slice(0, -1) : mjpegServerUrl;
+    
     const mjpegServerToken = process.env.MJPEG_SERVER_TOKEN;
     
     if (!mjpegServerToken) {
