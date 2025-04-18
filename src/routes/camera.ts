@@ -36,6 +36,7 @@ router.get('/house/:homeId', authenticateToken, async (req: AuthRequest, res: Re
         camera_id, 
         camera_name, 
         camera_address, 
+        hls_address,
         home_id, 
         created_at, 
         updated_at
@@ -49,6 +50,7 @@ router.get('/house/:homeId', authenticateToken, async (req: AuthRequest, res: Re
       cameraId: camera.camera_id,
       cameraName: camera.camera_name,
       cameraAddress: camera.camera_address,
+      hlsAddress: camera.hls_address,
       homeId: camera.home_id,
       createdAt: camera.created_at,
       updatedAt: camera.updated_at
@@ -91,6 +93,7 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
       cameraId: camera.camera_id,
       cameraName: camera.camera_name,
       cameraAddress: camera.camera_address,
+      hlsAddress: camera.hls_address,
       homeId: camera.home_id,
       createdAt: camera.created_at,
       updatedAt: camera.updated_at
@@ -103,7 +106,7 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
 
 // Create a new camera
 router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
-  const { cameraName, cameraAddress, homeId } = req.body;
+  const { cameraName, cameraAddress, hlsAddress, homeId } = req.body;
   const userEmail = req.user?.email;
 
   if (!userEmail) {
@@ -133,14 +136,15 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 
     // Create the camera
     const result = await pool.query(
-      'INSERT INTO cameras (camera_name, camera_address, home_id) VALUES ($1, $2, $3) RETURNING *',
-      [cameraName, cameraAddress, homeId]
+      'INSERT INTO cameras (camera_name, camera_address, hls_address, home_id) VALUES ($1, $2, $3, $4) RETURNING *',
+      [cameraName, cameraAddress, hlsAddress, homeId]
     );
 
     res.status(201).json({
       cameraId: result.rows[0].camera_id,
       cameraName: result.rows[0].camera_name,
       cameraAddress: result.rows[0].camera_address,
+      hlsAddress: result.rows[0].hls_address,
       homeId: result.rows[0].home_id,
       createdAt: result.rows[0].created_at,
       updatedAt: result.rows[0].updated_at
@@ -154,7 +158,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 // Update a camera
 router.put('/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
-  const { cameraName, cameraAddress } = req.body;
+  const { cameraName, cameraAddress, hlsAddress } = req.body;
   const userEmail = req.user?.email;
 
   if (!userEmail) {
@@ -163,8 +167,8 @@ router.put('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
   }
 
   // Validate required fields
-  if (!cameraName && !cameraAddress) {
-    res.status(400).json({ error: 'Camera name or address must be provided' });
+  if (!cameraName && !cameraAddress && !hlsAddress) {
+    res.status(400).json({ error: 'Camera name, address, or HLS address must be provided' });
     return;
   }
 
@@ -200,6 +204,12 @@ router.put('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
       paramIndex++;
     }
 
+    if (hlsAddress) {
+      updateQuery += `, hls_address = $${paramIndex}`;
+      queryParams.push(hlsAddress);
+      paramIndex++;
+    }
+
     updateQuery += ` WHERE camera_id = $${paramIndex} RETURNING *`;
     queryParams.push(id);
 
@@ -210,6 +220,7 @@ router.put('/:id', authenticateToken, async (req: AuthRequest, res: Response) =>
       cameraId: result.rows[0].camera_id,
       cameraName: result.rows[0].camera_name,
       cameraAddress: result.rows[0].camera_address,
+      hlsAddress: result.rows[0].hls_address,
       homeId: result.rows[0].home_id,
       createdAt: result.rows[0].created_at,
       updatedAt: result.rows[0].updated_at
@@ -271,7 +282,7 @@ router.post('/stream/start', authenticateToken, async (req: AuthRequest, res: Re
     
     // Get camera details from database
     const camera = await pool.query(`
-      SELECT c.camera_address, h.home_owner
+      SELECT c.camera_address, c.hls_address, h.home_owner
       FROM cameras c
       JOIN houses h ON c.home_id = h.home_id
       LEFT JOIN permissions p ON h.home_id = p.home_id AND p.user_id = $1
