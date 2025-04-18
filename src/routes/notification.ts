@@ -175,7 +175,7 @@ router.put('/:eventId/status', authenticateToken, async (req: AuthRequest, res: 
 
     // Update the notification status
     const result = await pool.query(
-      'UPDATE notifications SET status = $1, updated_at = NOW() WHERE event_id = $2 RETURNING *',
+      'UPDATE notifications SET status = $1 WHERE event_id = $2 RETURNING *',
       [status, eventId]
     );
 
