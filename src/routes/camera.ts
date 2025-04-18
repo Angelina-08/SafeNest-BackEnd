@@ -380,4 +380,52 @@ router.post('/stream/stop', authenticateToken, async (req: AuthRequest, res: Res
   }
 });
 
+router.post('/stream/heartbeat', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { streamId } = req.body;
+    
+    if (!streamId) {
+      return res.status(400).json({ error: 'Stream ID is required' });
+    }
+    
+    // Request heartbeat from MJPEG server
+    let mjpegServerUrl = process.env.MJPEG_SERVER_URL || 'http://localhost:3000';
+    // Remove trailing slash if present to avoid double slash in URL
+    mjpegServerUrl = mjpegServerUrl.endsWith('/') ? mjpegServerUrl.slice(0, -1) : mjpegServerUrl;
+    
+    const mjpegServerToken = process.env.MJPEG_SERVER_TOKEN;
+    
+    if (!mjpegServerToken) {
+      console.error('MJPEG_SERVER_TOKEN environment variable is not set');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+    
+    try {
+      await axios.post(
+        `${mjpegServerUrl}/stream/${streamId}/heartbeat`,
+        {},
+        {
+          headers: {
+            'Authorization': mjpegServerToken,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      
+      res.json({ success: true });
+    } catch (error: unknown) {
+      console.error('Error sending heartbeat to MJPEG server:', error instanceof Error ? error.message : 'Unknown error');
+      if (axios.isAxiosError(error) && error.response) {
+        console.error('MJPEG server response:', error.response.data);
+      }
+      // Even if the heartbeat fails, we return success to the client
+      // as this is not critical and will be retried on the next interval
+      res.json({ success: true });
+    }
+  } catch (error: unknown) {
+    console.error('Error processing heartbeat:', error instanceof Error ? error.message : 'Unknown error');
+    res.status(500).json({ error: 'Failed to process heartbeat' });
+  }
+});
+
 export default router;
