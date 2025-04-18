@@ -12,12 +12,15 @@ const router = express.Router();
 router.post('/', async (req: express.Request, res: express.Response) => {
   try {
     // Check if required data is present
-    if (!req.files || !req.files['image'] || !req.body.cameraId) {
+    if (!req.body.image || !req.body.cameraId) {
       return res.status(400).json({ error: 'Missing required fields: image or cameraId' });
     }
 
     const cameraId = parseInt(req.body.cameraId);
-    const image = req.files['image'] as UploadedFile;
+    
+    // Convert base64 image to buffer
+    const imageBase64 = req.body.image;
+    const imageBuffer = Buffer.from(imageBase64, 'base64');
     
     // Validate camera exists
     const cameraResult = await pool.query(
@@ -39,7 +42,7 @@ router.post('/', async (req: express.Request, res: express.Response) => {
     const fileName = `alerts/${camera.home_id}/${cameraId}/${timestamp}.jpg`;
     
     // Upload to blob storage
-    const { url } = await put(fileName, image.data, { 
+    const { url } = await put(fileName, imageBuffer, { 
       access: 'public',
       contentType: 'image/jpeg'
     });
