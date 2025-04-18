@@ -3,23 +3,12 @@ import { pool } from '../db';
 import { put } from '@vercel/blob';
 import { sendEmail } from '../utils/mailer';
 import { UploadedFile } from 'express-fileupload';
-
-// Define custom interface to extend Express Request
-interface AuthenticatedRequest extends Request {
-  user?: {
-    email: string;
-    firstName?: string;
-    lastName?: string;
-  };
-  files?: {
-    image?: UploadedFile | UploadedFile[];
-  };
-}
+import { AuthRequest } from '../middleware/auth';
 
 /**
  * Create a new notification when an alert is triggered
  */
-export const createNotification = async (req: Request, res: Response) => {
+export const createNotification = async (req: AuthRequest, res: Response) => {
   try {
     // Check if required data is present
     if (!req.files || !req.files['image'] || !req.body.cameraId) {
@@ -93,7 +82,7 @@ export const createNotification = async (req: Request, res: Response) => {
 /**
  * Get notifications for a user
  */
-export const getNotifications = async (req: AuthenticatedRequest, res: Response) => {
+export const getNotifications = async (req: AuthRequest, res: Response) => {
   try {
     const userEmail = req.user?.email;
     
@@ -125,7 +114,7 @@ export const getNotifications = async (req: AuthenticatedRequest, res: Response)
 /**
  * Update notification status (resolved or false_alarm)
  */
-export const updateNotificationStatus = async (req: AuthenticatedRequest, res: Response) => {
+export const updateNotificationStatus = async (req: AuthRequest, res: Response) => {
   try {
     const { eventId } = req.params;
     const { status } = req.body;
@@ -171,7 +160,7 @@ export const updateNotificationStatus = async (req: AuthenticatedRequest, res: R
 /**
  * Get notification details by ID
  */
-export const getNotificationById = async (req: AuthenticatedRequest, res: Response) => {
+export const getNotificationById = async (req: AuthRequest, res: Response) => {
   try {
     const { eventId } = req.params;
     const userEmail = req.user?.email;
