@@ -296,6 +296,7 @@ router.post('/stream/start', authenticateToken, async (req: AuthRequest, res: Re
     }
     
     try {
+      console.log(`Connecting to MJPEG server at ${mjpegServerUrl}/start-stream`);
       const response = await axios.post(
         `${mjpegServerUrl}/start-stream`,
         {
@@ -308,6 +309,8 @@ router.post('/stream/start', authenticateToken, async (req: AuthRequest, res: Re
           }
         }
       );
+      
+      console.log('MJPEG server response:', response.data);
       
       // Return stream details to client
       res.json({
