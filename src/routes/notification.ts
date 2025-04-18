@@ -1,12 +1,12 @@
 import express from 'express';
+import type { UploadedFile } from 'express-fileupload';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
-import fileUpload from 'express-fileupload';
 import { pool } from '../db';
 import { put } from '@vercel/blob';
 import { sendEmail } from '../utils/mailer';
 
 const router = express.Router();
-router.use(fileUpload());
+// fileUpload middleware is applied globally in index.ts
 
 // Public route for receiving alerts from the detection script
 router.post('/', async (req: express.Request, res: express.Response) => {
@@ -17,7 +17,7 @@ router.post('/', async (req: express.Request, res: express.Response) => {
     }
 
     const cameraId = parseInt(req.body.cameraId);
-    const image = req.files['image'] as fileUpload.UploadedFile;
+    const image = req.files['image'] as UploadedFile;
     
     // Validate camera exists
     const cameraResult = await pool.query(
